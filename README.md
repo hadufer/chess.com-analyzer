@@ -1,5 +1,7 @@
 # Chess.com Analyzer
 
+[![Chrome Web Store](https://img.shields.io/badge/Chrome%20Web%20Store-Install-blue?logo=googlechrome)](https://chromewebstore.google.com/detail/chesscom-analyzer/iicoipbphmgocoipjhakhbccnlkbmbnm)
+
 A Chrome extension that provides real-time Stockfish analysis for Chess.com games, displaying the top 3 best moves with visual arrows on the board and an evaluation bar in the popup.
 
 ## Features
