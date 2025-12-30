@@ -268,28 +268,31 @@
         });
     }
 
-    // Analyze current position
+    // Analyze current position (Debounced)
+    let debounceTimer = null;
     function analyzeCurrentPosition() {
         if (!settings.enabled) return;
 
-        const now = Date.now();
-        if (now - lastAnalysisTime < ANALYSIS_DEBOUNCE) return;
-        lastAnalysisTime = now;
+        // Clear pending analysis
+        if (debounceTimer) clearTimeout(debounceTimer);
 
-        const fen = extractFEN();
-        if (!fen) return;
+        // Schedule new analysis - wait for board to settle (200ms)
+        debounceTimer = setTimeout(() => {
+            const fen = extractFEN();
+            if (!fen) return;
 
-        const fenPosition = fen.split(' ')[0];
-        if (fenPosition === lastFen) return;
+            const fenPosition = fen.split(' ')[0];
+            if (fenPosition === lastFen) return;
 
-        lastFen = fenPosition;
-        clearArrows();
+            lastFen = fenPosition;
+            clearArrows();
 
-        chrome.runtime.sendMessage({
-            type: 'analyze',
-            fen: fen,
-            depth: settings.depth
-        }).catch(() => { });
+            chrome.runtime.sendMessage({
+                type: 'analyze',
+                fen: fen,
+                depth: settings.depth
+            }).catch(() => { });
+        }, 200);
     }
 
     // Message listener
