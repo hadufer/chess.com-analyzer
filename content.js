@@ -3,7 +3,6 @@
 (function () {
     'use strict';
 
-    const STARTING_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR';
     const ANALYSIS_DEBOUNCE = 50;
     const ARROW_COLORS = ['#32CD32', '#FFA500', '#FFD700'];
 
@@ -281,7 +280,6 @@
         if (!fen) return;
 
         const fenPosition = fen.split(' ')[0];
-        if (fenPosition === STARTING_FEN) { clearArrows(); return; }
         if (fenPosition === lastFen) return;
 
         lastFen = fenPosition;
