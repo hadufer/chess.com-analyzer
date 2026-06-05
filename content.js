@@ -343,9 +343,33 @@
     });
 
     // Setup observer
-    function setupObserver() {
+    let boardObserver = null;
+    let observedBoard = null;
+
+    // (Re)attach the move observer to the CURRENT board. chess.com swaps the
+    // <wc-chess-board> element (new game, SPA navigation), which would otherwise
+    // leave us observing a detached node — moves would go undetected until a
+    // page reload. Returns false if no board with pieces is available yet.
+    function attachBoardObserver() {
         const context = getBoardContext();
-        if (!context) {
+        if (!context) return false;
+
+        if (boardObserver) boardObserver.disconnect();
+        observedBoard = context.board;
+
+        boardObserver = new MutationObserver(() => {
+            cachedOrientation = null;
+            analyzeCurrentPosition();
+        });
+        boardObserver.observe(context.root === document ? context.board : context.root, {
+            childList: true, subtree: true, attributes: true,
+            attributeFilter: ['class']
+        });
+        return true;
+    }
+
+    function setupObserver() {
+        if (!attachBoardObserver()) {
             setTimeout(setupObserver, 1000);
             return;
         }
@@ -353,18 +377,19 @@
         createArrowsContainer();
         loadSettings();
 
-        const observer = new MutationObserver(() => {
-            cachedOrientation = null;
-            analyzeCurrentPosition();
-        });
-
-        observer.observe(context.root === document ? context.board : context.root, {
-            childList: true, subtree: true, attributes: true,
-            attributeFilter: ['class']
-        });
-
+        // Detect the board being added/replaced (e.g. a new game) and re-attach
+        // the move observer to it, then analyse the fresh position.
         const docObserver = new MutationObserver(() => {
-            if (!document.querySelector('wc-chess-board')) arrowsSvg = null;
+            const board = document.querySelector('wc-chess-board');
+            if (!board) {
+                arrowsSvg = null;
+                observedBoard = null;
+                return;
+            }
+            if (board !== observedBoard) {
+                if (!arrowsSvg || !arrowsSvg.isConnected) createArrowsContainer();
+                if (attachBoardObserver()) analyzeCurrentPosition();
+            }
         });
         docObserver.observe(document.body, { childList: true, subtree: true });
 
