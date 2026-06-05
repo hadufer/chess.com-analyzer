@@ -46,7 +46,10 @@
     {
       "resources": [
         "stockfish.js",
-        "offscreen.html"
+        "offscreen.html",
+        "stockfish.wasm",
+        "stockfish.loader.js",
+        "stockfish.asm.js"
       ],
       "matches": [
         "https://www.chess.com/*"

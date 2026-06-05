@@ -3,7 +3,6 @@
 (function () {
     'use strict';
 
-    const ANALYSIS_DEBOUNCE = 50;
     const ARROW_COLORS = ['#32CD32', '#FFA500', '#FFD700'];
 
     const PIECE_MAP = {
@@ -12,21 +11,21 @@
     };
 
     // Settings
-    let settings = { enabled: true, depth: 15, showArrows: true };
+    let settings = { enabled: true, depth: 15, showArrows: true, multipv: 3 };
 
     // State
     let lastFen = '';
-    let lastAnalysisTime = 0;
     let cachedOrientation = null;
     let arrowsSvg = null;
     let latestAnalysis = null;
 
     // Load settings
     function loadSettings() {
-        chrome.storage.local.get(['enabled', 'depth', 'showArrows'], (result) => {
+        chrome.storage.local.get(['enabled', 'depth', 'showArrows', 'multipv'], (result) => {
             settings.enabled = result.enabled !== false;
             settings.depth = result.depth || 15;
             settings.showArrows = result.showArrows !== false;
+            settings.multipv = result.multipv || 3;
         });
     }
 
@@ -268,31 +267,53 @@
         });
     }
 
-    // Analyze current position (Debounced)
+    // Analyze current position
+    // The observer watches 'class' only (not animation 'style' frames), so this
+    // fires roughly once per move rather than once per animation frame. We still
+    // extract the FEN and bail out cheaply when the piece layout is unchanged,
+    // then debounce so a burst of mutations for one move yields a single analysis.
+    const DEBOUNCE_DELAY = 100;
+
     let debounceTimer = null;
+    let pendingFen = null;
+
+    function flushAnalysis() {
+        const fen = pendingFen;
+        pendingFen = null;
+        if (!fen || !settings.enabled) return;
+
+        lastFen = fen.split(' ')[0];
+        clearArrows();
+
+        chrome.runtime.sendMessage({
+            type: 'analyze',
+            fen: fen,
+            depth: settings.depth,
+            multipv: settings.multipv
+        }).catch(() => { });
+    }
+
+    function cancelPendingAnalysis() {
+        if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
+        pendingFen = null;
+    }
+
     function analyzeCurrentPosition() {
         if (!settings.enabled) return;
 
-        // Clear pending analysis
+        const fen = extractFEN();
+        if (!fen) return;
+
+        const fenPosition = fen.split(' ')[0];
+        // Ignore mutations that don't change the piece layout.
+        if (fenPosition === lastFen) return;
+
+        pendingFen = fen;
         if (debounceTimer) clearTimeout(debounceTimer);
-
-        // Schedule new analysis - wait for board to settle (200ms)
         debounceTimer = setTimeout(() => {
-            const fen = extractFEN();
-            if (!fen) return;
-
-            const fenPosition = fen.split(' ')[0];
-            if (fenPosition === lastFen) return;
-
-            lastFen = fenPosition;
-            clearArrows();
-
-            chrome.runtime.sendMessage({
-                type: 'analyze',
-                fen: fen,
-                depth: settings.depth
-            }).catch(() => { });
-        }, 200);
+            debounceTimer = null;
+            flushAnalysis();
+        }, DEBOUNCE_DELAY);
     }
 
     // Message listener
@@ -304,8 +325,10 @@
             settings.enabled = message.settings.enabled;
             settings.depth = message.settings.depth;
             settings.showArrows = message.settings.showArrows;
+            settings.multipv = message.settings.multipv || 3;
 
             if (!settings.enabled) {
+                cancelPendingAnalysis();
                 clearArrows();
             } else {
                 lastFen = '';
@@ -337,7 +360,7 @@
 
         observer.observe(context.root === document ? context.board : context.root, {
             childList: true, subtree: true, attributes: true,
-            attributeFilter: ['class', 'style']
+            attributeFilter: ['class']
         });
 
         const docObserver = new MutationObserver(() => {

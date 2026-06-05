@@ -4,6 +4,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const enabledCheckbox = document.getElementById('enabledCheckbox');
     const depthSlider = document.getElementById('depthSlider');
     const depthValue = document.getElementById('depthValue');
+    const multipvSlider = document.getElementById('multipvSlider');
+    const multipvValue = document.getElementById('multipvValue');
     const arrowsCheckbox = document.getElementById('arrowsCheckbox');
     const movesList = document.getElementById('movesList');
     const currentDepthText = document.getElementById('currentDepth');
@@ -12,13 +14,17 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentTabId = null;
 
     // Load saved settings
-    chrome.storage.local.get(['enabled', 'depth', 'showArrows'], (result) => {
+    chrome.storage.local.get(['enabled', 'depth', 'showArrows', 'multipv'], (result) => {
         isEnabled = result.enabled !== false;
         enabledCheckbox.checked = isEnabled;
 
-        const depth = result.depth || 18;
+        const depth = result.depth || 15;
         depthSlider.value = depth;
         depthValue.textContent = depth;
+
+        const multipv = result.multipv || 3;
+        multipvSlider.value = multipv;
+        multipvValue.textContent = multipv;
 
         arrowsCheckbox.checked = result.showArrows !== false;
 
@@ -58,15 +64,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Depth slider
-    depthSlider.addEventListener('input', () => {
-        depthValue.textContent = depthSlider.value;
-    });
+    // Sliders (Depth, Lines) share identical wiring.
+    function setupSlider(slider, valueEl, storageKey) {
+        slider.addEventListener('input', () => {
+            valueEl.textContent = slider.value;
+        });
+        slider.addEventListener('change', () => {
+            chrome.storage.local.set({ [storageKey]: parseInt(slider.value) });
+            notifyContentScript();
+        });
+    }
 
-    depthSlider.addEventListener('change', () => {
-        chrome.storage.local.set({ depth: parseInt(depthSlider.value) });
-        notifyContentScript();
-    });
+    setupSlider(depthSlider, depthValue, 'depth');
+    setupSlider(multipvSlider, multipvValue, 'multipv');
 
     // Arrows checkbox
     arrowsCheckbox.addEventListener('change', () => {
@@ -82,7 +92,8 @@ document.addEventListener('DOMContentLoaded', () => {
             settings: {
                 enabled: isEnabled,
                 depth: parseInt(depthSlider.value),
-                showArrows: arrowsCheckbox.checked
+                showArrows: arrowsCheckbox.checked,
+                multipv: parseInt(multipvSlider.value)
             }
         });
     }

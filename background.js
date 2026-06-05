@@ -7,6 +7,8 @@ let currentTabId = null;
 let lastDepthSent = 0;
 let currentFen = null;
 let latestAnalysisData = null; // Store latest analysis for popup
+let searchActive = false;   // a 'go' was issued whose 'bestmove' has not been seen yet
+let staleBestmoves = 0;     // bestmoves still expected from aborted (stopped) searches — to ignore
 
 // Pre-compiled regex patterns
 const REGEX = {
@@ -120,23 +122,32 @@ function broadcastAnalysis(isFinal) {
 }
 
 // Start analysis of a position
-async function analyzePosition(fen, depth) {
+async function analyzePosition(fen, depth, multipv) {
     await setupOffscreenDocument();
+
+    const clampedMultipv = Math.min(3, Math.max(1, parseInt(multipv) || 3));
+    const clampedDepth = Math.min(25, Math.max(10, parseInt(depth) || 15));
+
+    // Aborting the running search (via 'stop' below) makes it emit one last,
+    // now-stale 'bestmove'. Mark it so its trailing output is discarded.
+    if (searchActive) staleBestmoves++;
 
     currentAnalysis = { moves: [], depth: 0 };
     lastDepthSent = 0;
     currentFen = fen;
 
     sendStockfishCommand('stop');
+    sendStockfishCommand(`setoption name MultiPV value ${clampedMultipv}`);
     sendStockfishCommand(`position fen ${fen}`);
-    sendStockfishCommand(`go depth ${depth}`);
+    sendStockfishCommand(`go depth ${clampedDepth}`);
+    searchActive = true;
 }
 
 // Listen for messages
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'analyze') {
         currentTabId = sender.tab?.id;
-        analyzePosition(message.fen, message.depth || 18);
+        analyzePosition(message.fen, message.depth, message.multipv);
         sendResponse({ status: 'analyzing' });
         return true;
     }
@@ -158,16 +169,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
     }
 
+    // Engine failed to load, errored, or hung: reset finalize state so a missing
+    // 'bestmove' can't permanently wedge future analyses; the next analyze retries.
+    if (message.type === 'stockfishError') {
+        searchActive = false;
+        staleBestmoves = 0;
+        currentAnalysis = null;
+        lastDepthSent = 0;
+        return true;
+    }
+
     // Messages from offscreen document (Stockfish output)
     if (message.type === 'stockfishOutput') {
         const line = message.line;
 
         if (line.includes('info depth') && line.includes(' pv ')) {
-            parseAnalysisLine(line);
+            // Ignore info lines still draining from a previous (stopped) search;
+            // otherwise they'd be parsed into the new position's analysis.
+            if (staleBestmoves === 0) parseAnalysisLine(line);
         }
 
         if (line.startsWith('bestmove')) {
-            broadcastAnalysis(true);
+            if (staleBestmoves > 0) {
+                staleBestmoves--; // stale bestmove from an aborted search — discard
+            } else {
+                searchActive = false;
+                broadcastAnalysis(true);
+            }
         }
     }
 
