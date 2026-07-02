@@ -9,6 +9,13 @@ let currentFen = null;
 let latestAnalysisData = null; // Store latest analysis for popup
 let searchActive = false;   // a 'go' was issued whose 'bestmove' has not been seen yet
 let staleBestmoves = 0;     // bestmoves still expected from aborted (stopped) searches — to ignore
+let lastEngineOutputAt = 0; // timestamp of the most recent Stockfish output line
+let lastGoAt = 0;           // timestamp of the most recent 'go' command issued
+
+// A running search streams 'info' lines continuously, so this much silence while we still think a
+// search is active means its 'bestmove' was lost (e.g. dropped during a service-worker sleep). Used
+// to un-wedge searchActive/staleBestmoves so a later search's output can't be gated out forever.
+const ENGINE_IDLE_RESET_MS = 1500;
 
 // Pre-compiled regex patterns
 const REGEX = {
@@ -128,6 +135,17 @@ async function analyzePosition(fen, depth, multipv) {
     const clampedMultipv = Math.min(3, Math.max(1, parseInt(multipv) || 3));
     const clampedDepth = Math.min(25, Math.max(10, parseInt(depth) || 15));
 
+    // If we still think a search is running but the engine has been silent (no 'info' and no fresh
+    // 'go') for a while, its 'bestmove' was lost. Left alone, searchActive stays stuck true and
+    // every subsequent 'go' bumps staleBestmoves, which gates out the current position's info lines
+    // indefinitely — the board never gets fresh arrows. Reconcile before counting.
+    const now = Date.now();
+    if (searchActive && (now - lastEngineOutputAt) > ENGINE_IDLE_RESET_MS
+                     && (now - lastGoAt) > ENGINE_IDLE_RESET_MS) {
+        searchActive = false;
+        staleBestmoves = 0;
+    }
+
     // Aborting the running search (via 'stop' below) makes it emit one last,
     // now-stale 'bestmove'. Mark it so its trailing output is discarded.
     if (searchActive) staleBestmoves++;
@@ -140,6 +158,7 @@ async function analyzePosition(fen, depth, multipv) {
     sendStockfishCommand(`setoption name MultiPV value ${clampedMultipv}`);
     sendStockfishCommand(`position fen ${fen}`);
     sendStockfishCommand(`go depth ${clampedDepth}`);
+    lastGoAt = Date.now();
     searchActive = true;
 }
 
@@ -182,6 +201,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Messages from offscreen document (Stockfish output)
     if (message.type === 'stockfishOutput') {
         const line = message.line;
+        lastEngineOutputAt = Date.now();
 
         if (line.includes('info depth') && line.includes(' pv ')) {
             // Ignore info lines still draining from a previous (stopped) search;

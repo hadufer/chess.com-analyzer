@@ -15,6 +15,7 @@
 
     // State
     let lastFen = '';
+    let drawnFen = '';            // placement we have actually drawn arrows for (self-heal tracking)
     let cachedOrientation = null;
     let arrowsSvg = null;
     let latestAnalysis = null;
@@ -265,6 +266,12 @@
             const parsed = parseUCIMove(move.move);
             if (parsed) drawArrow(parsed.from, parsed.to, index, scoreText);
         });
+
+        // The result for the current position arrived and was rendered: record it and cancel the
+        // self-heal watchdog so it won't re-request. (Also set when arrows are hidden via the
+        // showArrows preference — the analysis still arrived, so no re-request is needed.)
+        drawnFen = lastFen;
+        if (analysisWatchdog) { clearTimeout(analysisWatchdog); analysisWatchdog = null; }
     }
 
     // Analyze current position
@@ -273,18 +280,18 @@
     // extract the FEN and bail out cheaply when the piece layout is unchanged,
     // then debounce so a burst of mutations for one move yields a single analysis.
     const DEBOUNCE_DELAY = 100;
+    // Self-heal: if no arrows are drawn for the position we just requested (a dropped, late, or
+    // engine-suppressed result would otherwise leave the board blank until the user toggles the
+    // extension off/on — the only path that resets lastFen), re-request it. Bounded so a genuinely
+    // dead engine can't spin. Paired with displayAnalysis, which records drawnFen on success.
+    const ANALYSIS_WATCHDOG_DELAY = 1500;
+    const ANALYSIS_WATCHDOG_MAX_RETRIES = 3;
 
     let debounceTimer = null;
     let pendingFen = null;
+    let analysisWatchdog = null;
 
-    function flushAnalysis() {
-        const fen = pendingFen;
-        pendingFen = null;
-        if (!fen || !settings.enabled) return;
-
-        lastFen = fen.split(' ')[0];
-        clearArrows();
-
+    function sendAnalyze(fen) {
         chrome.runtime.sendMessage({
             type: 'analyze',
             fen: fen,
@@ -293,8 +300,39 @@
         }).catch(() => { });
     }
 
+    // Re-issue the analyze for `fen` if `placement` still has no arrows after the delay. Bypasses
+    // the fenPosition===lastFen bail in analyzeCurrentPosition (which never re-fires on a static
+    // board), so a one-off missed result recovers on its own instead of needing a manual toggle.
+    function armAnalysisWatchdog(fen, placement) {
+        if (analysisWatchdog) clearTimeout(analysisWatchdog);
+        let retries = 0;
+        const tick = () => {
+            // A newer flush clears this timer, so reaching here means placement === lastFen.
+            if (!settings.enabled || drawnFen === placement || retries++ >= ANALYSIS_WATCHDOG_MAX_RETRIES) {
+                analysisWatchdog = null;
+                return;
+            }
+            sendAnalyze(fen);
+            analysisWatchdog = setTimeout(tick, ANALYSIS_WATCHDOG_DELAY);
+        };
+        analysisWatchdog = setTimeout(tick, ANALYSIS_WATCHDOG_DELAY);
+    }
+
+    function flushAnalysis() {
+        const fen = pendingFen;
+        pendingFen = null;
+        if (!fen || !settings.enabled) return;
+
+        lastFen = fen.split(' ')[0];
+        clearArrows();
+        drawnFen = '';                // nothing rendered yet for this request
+        sendAnalyze(fen);
+        armAnalysisWatchdog(fen, lastFen);
+    }
+
     function cancelPendingAnalysis() {
         if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
+        if (analysisWatchdog) { clearTimeout(analysisWatchdog); analysisWatchdog = null; }
         pendingFen = null;
     }
 
