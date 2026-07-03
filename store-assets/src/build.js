@@ -20,6 +20,17 @@ const crop = (uri, w) => {
       margin-left:${-Math.round(box.x*s)}px;margin-top:${-Math.round(box.y*s)}px;display:block"></div>`;
 };
 
+// Popup crop: the 400×620 capture has a dead dark lower third below the
+// content. Show only the top `PC` px, scaled to `w` px wide (cap at native
+// 400 to stay sharp), wrapped so the wrapper supplies the rounded bottom.
+const POPUP_W = 400, POPUP_CONTENT = 416;
+const popupCrop = (w) => {
+  const s = w / POPUP_W;
+  return `<div style="width:${w}px;height:${Math.round(POPUP_CONTENT*s)}px;overflow:hidden;
+    border-radius:12px;box-shadow:0 24px 60px rgba(0,0,0,.55);flex:none">
+    <img src="${popup}" style="width:${w}px;display:block"></div>`;
+};
+
 const page = (w,h,inner) => `<!doctype html><meta charset="utf-8"><style>
   *{margin:0;padding:0;box-sizing:border-box}
   html,body{width:${w}px;height:${h}px;overflow:hidden}
@@ -43,10 +54,9 @@ const out = {
   's1.html': shot(`See the <span class="accent">top 3 moves</span> — live on your board`,
                   crop(boardStart, 560), 'Best, second and third line, ranked by color'),
   's2.html': shot(`Instant Stockfish evaluation <span class="accent">at a glance</span>`,
-    crop(boardRuy, 470) +
-    `<img src="${popup}" style="height:560px;border-radius:12px;box-shadow:0 24px 60px rgba(0,0,0,.55)">`),
+    crop(boardRuy, 470) + popupCrop(400)),
   's3.html': shot(`Tune engine <span class="accent">depth</span> and number of <span class="accent">lines</span>`,
-    `<img src="${popup}" style="height:580px;border-radius:12px;box-shadow:0 24px 60px rgba(0,0,0,.55)">`,
+    popupCrop(400),
     'Depth 10–25 · 1–3 lines · arrows on/off'),
   's4.html': shot(`Works on <span class="accent">live games</span> and analysis`,
                   crop(boardRuy, 560), 'Arrows follow every move automatically'),
