@@ -19,3 +19,6 @@ dist/
 
 # Tooling
 .serena/
+
+# Generated store-asset pages
+store-assets/src/pages/
